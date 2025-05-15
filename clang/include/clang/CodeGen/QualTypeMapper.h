@@ -33,10 +33,30 @@ private:
   clang::ASTContext &ASTCtx;
   llvm::abi::TypeBuilder Builder;
 
-  llvm::DenseMap<clang::QualType, const llvm::abi::Type *> TypeCache;
+  llvm::DenseMap<QualType, const llvm::abi::Type *> TypeCache;
 
-  const llvm::abi::Type *convertBuiltinType(const clang::BuiltinType *BT,
-                                            bool InMemory = false);
+  static bool isFieldNamed(const FieldDecl *FD) {
+	  return FD->getIdentifier() != nullptr;
+  }
+    static bool typeHasNamedDataMember(QualType QT, ASTContext &Ctx) {
+    QT = QT.getCanonicalType().getUnqualifiedType();
+    
+    if (const auto *RT = QT->getAs<RecordType>()) {
+      const RecordDecl *RD = RT->getOriginalDecl();
+      if (RD) {
+        const RecordDecl *Def = RD->getDefinition();
+        if (Def) {
+          return Def->findFirstNamedDataMember() != nullptr;
+        }
+      }
+    }
+    
+    // For non-record types, consider them as having "named data"
+    // since they represent concrete data
+    return true;
+  }
+
+  const llvm::abi::Type *convertBuiltinType(const clang::BuiltinType *BT);
   const llvm::abi::Type *convertPointerType(const clang::PointerType *PT);
   const llvm::abi::Type *convertArrayType(const clang::ArrayType *AT);
   const llvm::abi::Type *convertVectorType(const clang::VectorType *VT);
@@ -69,7 +89,7 @@ public:
   explicit QualTypeMapper(clang::ASTContext &Ctx, llvm::BumpPtrAllocator &Alloc)
       : ASTCtx(Ctx), Builder(Alloc) {}
 
-  const llvm::abi::Type *convertType(clang::QualType QT, bool InMemory = false);
+  const llvm::abi::Type *convertType(clang::QualType QT);
 
   void clearCache() { TypeCache.clear(); }
 

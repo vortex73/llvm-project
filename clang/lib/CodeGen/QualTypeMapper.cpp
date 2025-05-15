@@ -40,19 +40,19 @@ namespace CodeGen {
 ///
 /// \param QT The Clang QualType to convert
 /// \return Corresponding LLVM ABI Type representation, or nullptr on error
-const llvm::abi::Type *QualTypeMapper::convertType(QualType QT, bool InMemory) {
+const llvm::abi::Type *QualTypeMapper::convertType(QualType QT) {
   // Canonicalize type and strip qualifiers
   // This ensures consistent type representation across different contexts
   QT = QT.getCanonicalType().getUnqualifiedType();
 
   // Results are cached since type conversion may be expensive
   auto It = TypeCache.find(QT);
-  if (It != TypeCache.end() && !QT->isBooleanType())
+  if (It != TypeCache.end())
     return It->second;
 
   const llvm::abi::Type *Result = nullptr;
   if (const auto *BT = dyn_cast<BuiltinType>(QT.getTypePtr()))
-    Result = convertBuiltinType(BT, InMemory);
+    Result = convertBuiltinType(BT);
   else if (const auto *PT = dyn_cast<PointerType>(QT.getTypePtr()))
     Result = convertPointerType(PT);
   else if (const auto *RT = dyn_cast<ReferenceType>(QT.getTypePtr()))
@@ -85,7 +85,7 @@ const llvm::abi::Type *QualTypeMapper::convertType(QualType QT, bool InMemory) {
     bool IsSigned = BIT->isSigned();
     llvm::Align TypeAlign = getTypeAlign(QT);
     return Builder.getIntegerType(RawNumBits, TypeAlign, IsSigned, false, true,
-                                  IsPromotableInt, InMemory);
+                                  IsPromotableInt);
   } else if (isa<ObjCObjectType>(QT.getTypePtr()) ||
              isa<ObjCObjectPointerType>(QT.getTypePtr())) {
     // Objective-C objects are represented as pointers in the ABI
@@ -99,7 +99,8 @@ const llvm::abi::Type *QualTypeMapper::convertType(QualType QT, bool InMemory) {
   } else
     QT.dump();
 
-  TypeCache[QT] = Result;
+  if (Result)
+    TypeCache[QT] = Result;
   return Result;
 }
 
@@ -109,8 +110,7 @@ const llvm::abi::Type *QualTypeMapper::convertType(QualType QT, bool InMemory) {
 ///
 /// \param BT The BuiltinType to convert
 /// \return Corresponding LLVM ABI integer, float, or void type
-const llvm::abi::Type *QualTypeMapper::convertBuiltinType(const BuiltinType *BT,
-                                                          bool InMemory) {
+const llvm::abi::Type *QualTypeMapper::convertBuiltinType(const BuiltinType *BT) {
   QualType QT(BT, 0);
 
   switch (BT->getKind()) {
@@ -122,7 +122,7 @@ const llvm::abi::Type *QualTypeMapper::convertBuiltinType(const BuiltinType *BT,
 
   case BuiltinType::Bool:
     return Builder.getIntegerType(1, getTypeAlign(QT), false, true, false,
-                                  ASTCtx.isPromotableIntegerType(QT), InMemory);
+                                  ASTCtx.isPromotableIntegerType(QT));
   case BuiltinType::Char_S:
   case BuiltinType::Char_U:
   case BuiltinType::SChar:
@@ -498,51 +498,10 @@ QualTypeMapper::convertUnionType(const clang::RecordDecl *RD,
       llvm::TypeSize::getFixed(Layout.getSize().getQuantity() * 8);
   llvm::Align Alignment = llvm::Align(Layout.getAlignment().getQuantity());
 
-auto *UnionMeta = Builder.createUnionMetadata(AllFields, Size, Alignment);
-  const llvm::abi::Type *StorageType = nullptr;
-  bool SeenNamedMember = false;
-
-  for (const auto *Field : RD->fields()) {
-    if (Field->isBitField() && Field->isZeroLengthBitField())
-      continue;
-
-    const llvm::abi::Type *FieldType = convertType(Field->getType(), true);
-
-    if (!SeenNamedMember) {
-      SeenNamedMember = Field->getIdentifier() != nullptr;
-      if (!SeenNamedMember) {
-        if (const auto *FieldRD = Field->getType()->getAsRecordDecl())
-          SeenNamedMember = FieldRD->findFirstNamedDataMember() != nullptr;
-      }
-
-      if (SeenNamedMember) {
-        StorageType = FieldType;
-      }
-    }
-
-    if (!StorageType ||
-        FieldType->getAlignment().value() >
-            StorageType->getAlignment().value() ||
-        (FieldType->getAlignment().value() ==
-             StorageType->getAlignment().value() &&
-         FieldType->getSizeInBits().getFixedValue() >
-             StorageType->getSizeInBits().getFixedValue())) {
-      StorageType = FieldType;
-    }
-  }
-
-  SmallVector<llvm::abi::FieldInfo, 1> UnionFields;
-  if (StorageType) {
-    UnionFields.emplace_back(StorageType, 0, false, 0, false);
-  }
-
-  const llvm::abi::StructType *LoweredUnion = Builder.getUnionType(
-      UnionFields, Size, Alignment, llvm::abi::StructPacking::Default,
-      isTransparent, RD->canPassInRegisters(),isa<CXXRecordDecl>(RD));
-
-  LoweredUnion->setMetadata(UnionMeta);
-
-  return LoweredUnion;
+  return Builder.getUnionType(AllFields, Size, Alignment,
+                              llvm::abi::StructPacking::Default,
+                              isTransparent, RD->canPassInRegisters(),
+                              isa<CXXRecordDecl>(RD));
 }
 
 llvm::Align QualTypeMapper::getPreferredTypeAlign(QualType QT) const {
@@ -578,20 +537,22 @@ void QualTypeMapper::computeFieldInfo(
   unsigned FieldIndex = 0;
 
   for (const auto *FD : RD->fields()) {
-    const llvm::abi::Type *FieldType = convertType(FD->getType(), true);
+    const llvm::abi::Type *FieldType = convertType(FD->getType());
     uint64_t OffsetInBits = Layout.getFieldOffset(FieldIndex);
 
     bool IsBitField = FD->isBitField();
     uint64_t BitFieldWidth = 0;
-    bool IsUnnamed = false;
+    bool IsUnnamedBitField = false;
+	bool IsNamed = isFieldNamed(FD);
+	bool HasNamedData = typeHasNamedDataMember(FD->getType(), ASTCtx);
 
     if (IsBitField) {
       BitFieldWidth = FD->getBitWidthValue();
-      IsUnnamed = FD->isUnnamedBitField();
+      IsUnnamedBitField = FD->isUnnamedBitField();
     }
 
     Fields.emplace_back(FieldType, OffsetInBits, IsBitField, BitFieldWidth,
-                        IsUnnamed);
+                        IsUnnamedBitField, IsNamed, HasNamedData);
     ++FieldIndex;
   }
 }

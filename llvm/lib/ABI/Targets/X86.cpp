@@ -8,21 +8,17 @@
 
 #include "llvm/ABI/ABIFunctionInfo.h"
 #include "llvm/ABI/ABIInfo.h"
-#include "llvm/ABI/ABITypeMapper.h"
 #include "llvm/ABI/TargetCodegenInfo.h"
 #include "llvm/ABI/Types.h"
-#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Triple.h"
 #include <algorithm>
 #include <cassert>
-#include <cmath>
 #include <cstdint>
 
 namespace llvm {
@@ -68,7 +64,8 @@ private:
 
   const Type *getIntegerTypeAtOffset(const Type *IRType, unsigned IROffset,
                                      const Type *SourceTy,
-                                     unsigned SourceOffset) const;
+                                     unsigned SourceOffset,
+									 bool InMemory = false) const;
 
   const Type *getSSETypeAtOffset(const Type *ABIType, unsigned ABIOffset,
                                  const Type *SourceTy,
@@ -104,6 +101,60 @@ public:
 
   bool has64BitPointers() const { return Has64BitPointers; }
 };
+
+static bool isNamedMember(const FieldInfo &Field) {
+  if (Field.IsBitField && Field.IsUnnamedBitfield && Field.BitFieldWidth == 0) {
+    return false;
+  }
+  
+  // A field is considered "named" if:
+  // 1. The field itself has a name, OR
+  // 2. The field is an unnamed struct/union that contains named data members
+  return Field.IsNamed || (!Field.IsNamed && Field.HasNamedDataMember);
+}
+
+static const Type *reduceUnionForX86_64(const StructType *UnionType, 
+                                         TypeBuilder &TB) {
+  assert(UnionType->isUnion() && "Expected union type");
+  
+  ArrayRef<FieldInfo> Fields = UnionType->getFields();
+  if (Fields.empty()) {
+    return nullptr;
+  }
+  
+  const Type *StorageType = nullptr;
+  bool SeenNamedMember = false;
+
+  for (const auto &Field : Fields) {
+    if (Field.IsBitField && Field.IsUnnamedBitfield && Field.BitFieldWidth == 0) {
+      continue;
+    }
+
+    const Type *FieldType = Field.FieldType;
+
+    if (UnionType->isTransparentUnion() && !StorageType) {
+      StorageType = FieldType;
+      break;
+    }
+
+    if (!SeenNamedMember) {
+      SeenNamedMember = isNamedMember(Field);
+      if (SeenNamedMember) {
+        StorageType = FieldType;
+        continue;
+      }
+    }
+
+    if (!StorageType ||
+        FieldType->getAlignment().value() > StorageType->getAlignment().value() ||
+        (FieldType->getAlignment().value() == StorageType->getAlignment().value() &&
+         FieldType->getSizeInBits().getFixedValue() > StorageType->getSizeInBits().getFixedValue())) {
+      StorageType = FieldType;
+    }
+  }
+
+  return StorageType;
+}
 
 void X86_64ABIInfo::postMerge(unsigned AggregateSize, Class &Lo,
                               Class &Hi) const {
@@ -453,10 +504,7 @@ void X86_64ABIInfo::classify(const Type *T, uint64_t OffsetBase, Class &Lo,
     // Classify the fields one at a time, merging the results.
 
     bool IsUnion = ST->isUnion() && !getABICompatInfo().Flags.Clang11Compat;
-    auto Fields = ST->isUnion() && ST->hasMetadata()
-                      ? ST->getMetadata<UnionMetadata>()->getFields()
-                      : ST->getFields();
-    for (const auto &Field : Fields) {
+    for (const auto &Field : ST->getFields()) {
       uint64_t Offset = OffsetBase + Field.OffsetInBits;
       bool BitField = Field.IsBitField;
 
@@ -515,8 +563,6 @@ X86_64ABIInfo::useFirstFieldIfTransparentUnion(const Type *Ty) const {
   if (const auto *ST = dyn_cast<StructType>(Ty)) {
     if (ST->isUnion() && ST->isTransparentUnion()) {
       auto Fields = ST->getFields();
-      if (ST->hasMetadata())
-        Fields = ST->getMetadata<UnionMetadata>()->getFields();
       assert(!Fields.empty() && "sema created an empty transparent union");
       return Fields.front().FieldType;
     }
@@ -787,7 +833,7 @@ ABIArgInfo X86_64ABIInfo::classifyReturnType(const Type *RetTy) const {
   return ABIArgInfo::getDirect(ResType);
 }
 
-/// GetX86_64ByValArgumentPair - Given a high and low type that can ideally
+///  Given a high and low type that can ideally
 /// be used as elements of a two register pair to pass or return, return a
 /// first class aggregate to represent them.  For example, if the low part of
 /// a by-value argument should be passed as i32* and the high part as float,
@@ -874,10 +920,8 @@ static bool bitsContainNoUserData(const Type *Ty, unsigned StartBit,
 
   // Handle structs - check all fields and base classes
   if (const StructType *ST = dyn_cast<StructType>(Ty)) {
-    if (ST->isUnion() && ST->hasMetadata()) {
-      if (const auto *UnionMeta = ST->getMetadata<UnionMetadata>()) {
-        // Handle union using original fields from metadata
-        for (const auto &Field : UnionMeta->getFields()) {
+    if (ST->isUnion()) {
+        for (const auto &Field : ST->getFields()) {
           if (Field.IsUnnamedBitfield)
             continue;
 
@@ -905,7 +949,6 @@ static bool bitsContainNoUserData(const Type *Ty, unsigned StartBit,
         }
         return true;
       }
-    }
     // Check base classes first (for C++ records)
     if (ST->isCXXRecord()) {
       for (unsigned I = 0; I < ST->getNumBaseClasses(); ++I) {
@@ -942,14 +985,33 @@ static bool bitsContainNoUserData(const Type *Ty, unsigned StartBit,
 const Type *X86_64ABIInfo::getIntegerTypeAtOffset(const Type *ABIType,
                                                   unsigned ABIOffset,
                                                   const Type *SourceTy,
-                                                  unsigned SourceOffset) const {
+                                                  unsigned SourceOffset,
+												  bool InMemory) const {
+
+  const Type *WorkingType = ABIType;
+  if (InMemory && ABIType->isInteger()) {
+    const auto *IT = cast<IntegerType>(ABIType);
+    unsigned OriginalBitWidth = IT->getSizeInBits().getFixedValue();
+    
+    unsigned WidenedBitWidth = OriginalBitWidth;
+    if (OriginalBitWidth <= 8) {
+      WidenedBitWidth = 8;
+    } else {
+      WidenedBitWidth = llvm::bit_ceil(OriginalBitWidth);
+    }
+    
+    if (WidenedBitWidth != OriginalBitWidth) {
+      WorkingType = TB.getIntegerType(WidenedBitWidth, ABIType->getAlignment(), 
+                                      IT->isSigned());
+    }
+  }
   // If we're dealing with an un-offset ABI type, then it means that we're
   // returning an 8-byte unit starting with it. See if we can safely use it.
   if (ABIOffset == 0) {
     // Pointers and int64's always fill the 8-byte unit.
-    if ((ABIType->isPointer() && Has64BitPointers) ||
-        (ABIType->isInteger() &&
-         cast<IntegerType>(ABIType)->getSizeInBits() == 64))
+    if ((WorkingType->isPointer() && Has64BitPointers) ||
+        (WorkingType->isInteger() &&
+         cast<IntegerType>(WorkingType)->getSizeInBits() == 64))
       return ABIType;
 
     // If we have a 1/2/4-byte integer, we can use it only if the rest of the
@@ -958,31 +1020,35 @@ const Type *X86_64ABIInfo::getIntegerTypeAtOffset(const Type *ABIType,
     // struct{double,int,int} because we wouldn't return the second int. We
     // have to do this analysis on the source type because we can't depend on
     // unions being lowered a specific way etc.
-    if ((ABIType->isInteger() &&
-         (cast<IntegerType>(ABIType)->getSizeInBits() == 1 ||
-          cast<IntegerType>(ABIType)->getSizeInBits() == 8 ||
-          cast<IntegerType>(ABIType)->getSizeInBits() == 16 ||
-          cast<IntegerType>(ABIType)->getSizeInBits() == 32)) ||
-        (ABIType->isPointer() && !Has64BitPointers)) {
+    if ((WorkingType->isInteger() &&
+         (cast<IntegerType>(WorkingType)->getSizeInBits() == 1 ||
+          cast<IntegerType>(WorkingType)->getSizeInBits() == 8 ||
+          cast<IntegerType>(WorkingType)->getSizeInBits() == 16 ||
+          cast<IntegerType>(WorkingType)->getSizeInBits() == 32)) ||
+        (WorkingType->isPointer() && !Has64BitPointers)) {
 
-      unsigned BitWidth = ABIType->isPointer()
+      unsigned BitWidth = WorkingType->isPointer()
                               ? 32
-                              : cast<IntegerType>(ABIType)->getSizeInBits();
+                              : cast<IntegerType>(WorkingType)->getSizeInBits();
 
       if (bitsContainNoUserData(SourceTy, SourceOffset * 8 + BitWidth,
                                 SourceOffset * 8 + 64))
-        return ABIType;
+        return WorkingType;
     }
   }
 
   if (const auto *STy = dyn_cast<StructType>(ABIType)) {
+	if (STy->isUnion()) {
+		const Type* ReducedType = reduceUnionForX86_64(STy, TB);
+		if (ReducedType) return getIntegerTypeAtOffset(ReducedType, ABIOffset, SourceTy, SourceOffset,true);
+	}
     if (const FieldInfo *Element =
             STy->getElementContainingOffset(ABIOffset * 8)) {
 
       unsigned ElementOffsetBytes = Element->OffsetInBits / 8;
       return getIntegerTypeAtOffset(Element->FieldType,
                                     ABIOffset - ElementOffsetBytes, SourceTy,
-                                    SourceOffset);
+                                    SourceOffset,true);
     }
   }
 
@@ -992,7 +1058,7 @@ const Type *X86_64ABIInfo::getIntegerTypeAtOffset(const Type *ABIType,
     if (EltSize > 0) {
       unsigned EltOffset = (ABIOffset / EltSize) * EltSize;
       return getIntegerTypeAtOffset(EltTy, ABIOffset - EltOffset, SourceTy,
-                                    SourceOffset);
+                                    SourceOffset,true);
     }
   }
 
@@ -1067,6 +1133,15 @@ const Type *X86_64ABIInfo::getSSETypeAtOffset(const Type *ABIType,
                                               unsigned ABIOffset,
                                               const Type *SourceTy,
                                               unsigned SourceOffset) const {
+
+  if (const auto *STy = dyn_cast<StructType>(ABIType)) {
+    if (STy->isUnion()) {
+      const Type *ReducedType = reduceUnionForX86_64(STy, TB);
+      if (ReducedType) {
+        return getSSETypeAtOffset(ReducedType, ABIOffset, SourceTy, SourceOffset);
+      }
+    }
+  }
 
   auto Is16bitFpTy = [](const Type *T) {
     return isFloatTypeWithSemantics(T, APFloat::IEEEhalf()) ||
@@ -1181,10 +1256,7 @@ const Type *X86_64ABIInfo::isSingleElementStruct(const Type *Ty) const {
     Found = Elem;
   }
 
-  auto Fields = ST->isUnion() && ST->hasMetadata()
-                    ? ST->getMetadata<UnionMetadata>()->getFields()
-                    : ST->getFields();
-  for (const auto &FI : Fields) {
+  for (const auto &FI : ST->getFields()) {
     if (isEmptyField(FI))
       continue;
 

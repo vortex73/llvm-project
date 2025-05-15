@@ -121,20 +121,17 @@ private:
   bool IsBoolean;
   bool IsBitInt;
   bool IsPromotable;
-  bool InMemory;
 
 public:
   IntegerType(uint64_t BitWidth, Align Align, bool Signed, bool IsBool = false,
-              bool BitInt = false, bool IsPromotableInt = false,
-              bool InMem = false)
+              bool BitInt = false, bool IsPromotableInt = false )
       : Type(TypeKind::Integer, TypeSize::getFixed(BitWidth), Align),
         IsSigned(Signed), IsBoolean(IsBool), IsBitInt(BitInt),
-        IsPromotable(IsPromotableInt), InMemory(InMem) {}
+        IsPromotable(IsPromotableInt) {}
 
   bool isSigned() const { return IsSigned; }
   bool isBool() const { return IsBoolean; }
   bool isBitInt() const { return IsBitInt; }
-  bool needsMemoryRep() const { return InMemory; }
   bool isPromotableIntegerType() const { return IsPromotable; }
 
   static bool classof(const Type *T) {
@@ -252,11 +249,13 @@ struct FieldInfo {
   bool IsBitField;
   bool IsUnnamedBitfield;
   uint64_t BitFieldWidth;
+  bool IsNamed;
+  bool HasNamedDataMember;
 
   FieldInfo(const Type *Type, uint64_t Offset = 0, bool BitField = false,
-            uint64_t BFWidth = 0, bool IsUnnamedBF = false)
+            uint64_t BFWidth = 0, bool IsUnnamedBF = false,bool named = true, bool hasNamedData = true)
       : FieldType(Type), OffsetInBits(Offset), IsBitField(BitField),
-        IsUnnamedBitfield(IsUnnamedBF), BitFieldWidth(BFWidth) {}
+        IsUnnamedBitfield(IsUnnamedBF), BitFieldWidth(BFWidth), IsNamed(named), HasNamedDataMember(hasNamedData) {}
 };
 
 enum class StructPacking { Default, Packed, ExplicitPacking };
@@ -407,10 +406,9 @@ public:
   const IntegerType *getIntegerType(uint64_t BitWidth, Align Align, bool Signed,
                                     bool IsBoolean = false,
                                     bool IsBitInt = false,
-                                    bool IsPromotable = false,
-                                    bool InMemory = false) {
+                                    bool IsPromotable = false ) {
     return new (Allocator.Allocate<IntegerType>()) IntegerType(
-        BitWidth, Align, Signed, IsBoolean, IsBitInt, IsPromotable, InMemory);
+        BitWidth, Align, Signed, IsBoolean, IsBitInt, IsPromotable);
   }
 const UnionMetadata* createUnionMetadata(ArrayRef<FieldInfo> Fields,
                                         TypeSize Size, Align Align) {

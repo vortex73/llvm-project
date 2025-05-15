@@ -39,15 +39,6 @@ Type *ABITypeMapper::convertType(const abi::Type *ABIType) {
   case abi::TypeKind::Integer: {
     const auto *IT = cast<abi::IntegerType>(ABIType);
     unsigned Bitwidth = IT->getSizeInBits().getFixedValue();
-
-    if (IT->needsMemoryRep()) {
-      if (Bitwidth <= 8) {
-        Bitwidth = 8;
-      } else {
-        Bitwidth = bit_ceil(Bitwidth);
-      }
-    }
-
     Result = IntegerType::get(Context, Bitwidth);
     break;
   }
