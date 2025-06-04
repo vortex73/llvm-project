@@ -836,6 +836,10 @@ const CGFunctionInfo &CodeGenTypes::arrangeLLVMFunctionInfo(
     RequiredArgs required) {
   assert(llvm::all_of(argTypes,
                       [](CanQualType T) { return T.isCanonicalAsParam(); }));
+  benchmarkABIMapper(resultType);
+  for (auto QT : argTypes) {
+  	benchmarkABIMapper(QT);
+  }
 
   // Lookup or create unique function info.
   llvm::FoldingSetNodeID ID;
