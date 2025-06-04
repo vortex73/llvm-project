@@ -327,6 +327,7 @@ class CodeGenModule : public CodeGenTypeCache {
   void operator=(const CodeGenModule &) = delete;
 
 public:
+  llvm::BumpPtrAllocator &getAllocator() { return Allocator; }
   struct Structor {
     Structor()
         : Priority(0), LexOrder(~0u), Initializer(nullptr),
@@ -345,6 +346,7 @@ public:
 
 private:
   ASTContext &Context;
+  llvm::BumpPtrAllocator Allocator;
   const LangOptions &LangOpts;
   IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS; // Only used for debug info.
   const HeaderSearchOptions &HeaderSearchOpts; // Only used for debug info.

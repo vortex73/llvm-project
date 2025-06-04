@@ -33,7 +33,7 @@ using namespace CodeGen;
 
 CodeGenTypes::CodeGenTypes(CodeGenModule &cgm)
     : CGM(cgm), Context(cgm.getContext()), TheModule(cgm.getModule()),
-      Target(cgm.getTarget()) {
+      Target(cgm.getTarget()), ABIMapper(cgm.getContext(), cgm.getAllocator()) {
   SkippedLayout = false;
   LongDoubleReferenced = false;
 }
