@@ -8,23 +8,21 @@
 
 #include "llvm/ABI/ABIFunctionInfo.h"
 #include "llvm/ABI/ABIInfo.h"
-#include "llvm/ABI/ABITypeMapper.h"
 #include "llvm/ABI/TargetCodegenInfo.h"
 #include "llvm/ABI/Types.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/ABI/TargetCodegenInfo.h"
+#include "llvm/ABI/Types.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Triple.h"
 #include <algorithm>
 #include <cassert>
-#include <cmath>
 #include <cstdint>
-#include <numeric>
 
 namespace llvm {
 namespace abi {
@@ -838,7 +836,7 @@ ABIArgInfo X86_64ABIInfo::classifyReturnType(const Type *RetTy) const {
   return ABIArgInfo::getDirect(ResType);
 }
 
-/// GetX86_64ByValArgumentPair - Given a high and low type that can ideally
+///  Given a high and low type that can ideally
 /// be used as elements of a two register pair to pass or return, return a
 /// first class aggregate to represent them.  For example, if the low part of
 /// a by-value argument should be passed as i32* and the high part as float,

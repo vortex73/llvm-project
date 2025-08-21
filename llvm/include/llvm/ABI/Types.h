@@ -277,7 +277,6 @@ private:
   bool HasNonTrivialDestructor;
   bool HasFlexibleArrayMember;
   bool HasUnalignedFields;
-
 public:
   StructType(ArrayRef<FieldInfo> StructFields, ArrayRef<FieldInfo> Bases,
              ArrayRef<FieldInfo> VBases, TypeSize Size, Align Align,
