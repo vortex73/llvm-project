@@ -1069,7 +1069,7 @@ const CGFunctionInfo &CodeGenTypes::arrangeLLVMFunctionInfo(
   } else if (info.getCC() == CC_Swift || info.getCC() == CC_SwiftAsync) {
     swiftcall::computeABIInfo(CGM, *FI);
   } else {
-    if (false && CGM.shouldUseLLVMABI()) {
+    if (CGM.shouldUseLLVMABI()) {
       SmallVector<const llvm::abi::Type *, 8> MappedArgTypes;
       for (CanQualType ArgType : argTypes)
         MappedArgTypes.push_back(Mapper.convertType(ArgType));
@@ -1085,7 +1085,7 @@ const CGFunctionInfo &CodeGenTypes::arrangeLLVMFunctionInfo(
   // Loop over all of the computed argument and return value info.  If any of
   // them are direct or extend without a specified coerce type, specify the
   // default now.
-  if (false && CGM.shouldUseLLVMABI() && tempFI) {
+  if (CGM.shouldUseLLVMABI() && tempFI) {
 
     const auto &abiRetInfo = tempFI->getReturnInfo();
     ABIArgInfo &cgRetInfo = FI->getReturnInfo();

@@ -13,10 +13,12 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
 #include "llvm/TargetParser/Triple.h"
+#include "llvm/ADT/DenseMap.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -112,10 +114,15 @@ static bool isNamedMember(const FieldInfo &Field) {
   // 2. The field is an unnamed struct/union that contains named data members
   return Field.IsNamed || (!Field.IsNamed && Field.HasNamedDataMember);
 }
-
+static llvm::DenseMap<const StructType*, const Type*> UnionReductionCache;
 static const Type *reduceUnionForX86_64(const StructType *UnionType, 
                                          TypeBuilder &TB) {
   assert(UnionType->isUnion() && "Expected union type");
+
+  auto CacheIt = UnionReductionCache.find(UnionType);
+  if (CacheIt != UnionReductionCache.end()) {
+    return CacheIt->second;
+  }
   
   ArrayRef<FieldInfo> Fields = UnionType->getFields();
   if (Fields.empty()) {
@@ -152,7 +159,7 @@ static const Type *reduceUnionForX86_64(const StructType *UnionType,
       StorageType = FieldType;
     }
   }
-
+  UnionReductionCache[UnionType] = StorageType;
   return StorageType;
 }
 
@@ -900,6 +907,10 @@ static bool bitsContainNoUserData(const Type *Ty, unsigned StartBit,
   unsigned TySize = Ty->getSizeInBits().getFixedValue();
   if (TySize <= StartBit)
     return true;
+
+  if (StartBit == 0 && EndBit >= TySize && 
+     (Ty->isInteger() || Ty->isFloat() || Ty->isPointer()))
+   return false;
 
   // Handle arrays - check each element
   if (const ArrayType *AT = dyn_cast<ArrayType>(Ty)) {

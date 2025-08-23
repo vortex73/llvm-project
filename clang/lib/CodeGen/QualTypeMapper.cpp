@@ -27,9 +27,7 @@
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ABI/Types.h"
 #include "llvm/Support/Alignment.h"
-#include "llvm/Support/Error.h"
 #include "llvm/Support/TypeSize.h"
-#include "llvm/Support/raw_ostream.h"
 
 namespace clang {
 namespace CodeGen {
