@@ -18,7 +18,6 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
 #include "llvm/TargetParser/Triple.h"
-#include "llvm/ADT/DenseMap.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -114,16 +113,10 @@ static bool isNamedMember(const FieldInfo &Field) {
   // 2. The field is an unnamed struct/union that contains named data members
   return Field.IsNamed || (!Field.IsNamed && Field.HasNamedDataMember);
 }
-static llvm::DenseMap<const StructType*, const Type*> UnionReductionCache;
 static const Type *reduceUnionForX86_64(const StructType *UnionType, 
                                          TypeBuilder &TB) {
   assert(UnionType->isUnion() && "Expected union type");
 
-  auto CacheIt = UnionReductionCache.find(UnionType);
-  if (CacheIt != UnionReductionCache.end()) {
-    return CacheIt->second;
-  }
-  
   ArrayRef<FieldInfo> Fields = UnionType->getFields();
   if (Fields.empty()) {
     return nullptr;
@@ -159,7 +152,6 @@ static const Type *reduceUnionForX86_64(const StructType *UnionType,
       StorageType = FieldType;
     }
   }
-  UnionReductionCache[UnionType] = StorageType;
   return StorageType;
 }
 
@@ -261,26 +253,29 @@ void X86_64ABIInfo::classify(const Type *T, uint64_t OffsetBase, Class &Lo,
     return;
   }
 
-  if (const auto *IT = dyn_cast<IntegerType>(T)) {
+
+  if (LLVM_LIKELY(T->isInteger())) {
+    const auto *IT = cast<IntegerType>(T);
     auto BitWidth = IT->getSizeInBits().getFixedValue();
 
-    if (BitWidth == 128 ||
-        (IT->isBitInt() && BitWidth > 64 && BitWidth <= 128)) {
+    if (BitWidth == 128 || (IT->isBitInt() && BitWidth > 64 && BitWidth <= 128)) {
       Lo = Integer;
       Hi = Integer;
-    } else if (BitWidth <= 64)
+    } else if (LLVM_LIKELY(BitWidth <= 64)) {
       Current = Integer;
-
+    }
     return;
   }
 
-  if (const auto *FT = dyn_cast<FloatType>(T)) {
+  if (T->isFloat()) {
+    const auto *FT = cast<FloatType>(T);
     const auto *FltSem = FT->getSemantics();
 
-    if (FltSem == &llvm::APFloat::IEEEsingle() ||
-        FltSem == &llvm::APFloat::IEEEdouble() ||
-        FltSem == &llvm::APFloat::IEEEhalf() ||
-        FltSem == &llvm::APFloat::BFloat()) {
+    if (LLVM_LIKELY(FltSem == &llvm::APFloat::IEEEsingle() ||
+                    FltSem == &llvm::APFloat::IEEEdouble())) {
+      Current = SSE;
+    } else if (FltSem == &llvm::APFloat::IEEEhalf() ||
+               FltSem == &llvm::APFloat::BFloat()) {
       Current = SSE;
     } else if (FltSem == &llvm::APFloat::IEEEquad()) {
       Lo = SSE;
@@ -288,11 +283,13 @@ void X86_64ABIInfo::classify(const Type *T, uint64_t OffsetBase, Class &Lo,
     } else if (FltSem == &llvm::APFloat::x87DoubleExtended()) {
       Lo = X87;
       Hi = X87UP;
-    } else
+    } else {
       Current = SSE;
+    }
     return;
   }
-  if (T->isPointer()) {
+
+  if (LLVM_LIKELY(T->isPointer())) {
     Current = Integer;
     return;
   }
@@ -907,10 +904,6 @@ static bool bitsContainNoUserData(const Type *Ty, unsigned StartBit,
   unsigned TySize = Ty->getSizeInBits().getFixedValue();
   if (TySize <= StartBit)
     return true;
-
-  if (StartBit == 0 && EndBit >= TySize && 
-     (Ty->isInteger() || Ty->isFloat() || Ty->isPointer()))
-   return false;
 
   // Handle arrays - check each element
   if (const ArrayType *AT = dyn_cast<ArrayType>(Ty)) {
