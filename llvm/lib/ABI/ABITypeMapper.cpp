@@ -16,12 +16,9 @@
 #include "llvm/ABI/ABITypeMapper.h"
 #include "llvm/ABI/Types.h"
 #include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/bit.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 

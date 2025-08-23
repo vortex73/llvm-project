@@ -18,7 +18,6 @@
 #include "llvm/ABI/Types.h"
 #include <cassert>
 #include <climits>
-#include <cstdint>
 
 namespace llvm {
 namespace abi {

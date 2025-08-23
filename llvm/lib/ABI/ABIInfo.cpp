@@ -1,5 +1,4 @@
 #include "llvm/ABI/ABIInfo.h"
-#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm::abi;
 bool ABIInfo::isAggregateTypeForABI(const Type *Ty) const {
