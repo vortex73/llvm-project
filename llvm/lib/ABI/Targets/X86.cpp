@@ -107,7 +107,11 @@ public:
 static const Type *reduceUnionForX8664(const RecordType *UnionType,
                                        TypeBuilder &TB) {
   assert(UnionType->isUnion() && "Expected union type");
+ static llvm::DenseMap<const RecordType *, const Type *> UnionReductionCache;
 
+  auto CacheIt = UnionReductionCache.find(UnionType);
+  if (CacheIt != UnionReductionCache.end())
+    return CacheIt->second;
   ArrayRef<FieldInfo> Fields = UnionType->getFields();
   if (Fields.empty()) {
     return nullptr;
@@ -138,6 +142,7 @@ if (!StorageType ||
       StorageType = FieldType;
     }
   }
+    UnionReductionCache[UnionType] = StorageType;
   return StorageType;
 }
 
