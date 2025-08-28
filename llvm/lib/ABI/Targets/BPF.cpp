@@ -67,7 +67,7 @@ public:
       if (IntTy->isBitInt() && BitWidth > 128)
         return ABIArgInfo::getIndirect(ArgTy->getAlignment().value());
 
-      if (isPromotableInteger(IntTy))
+      if (IntTy->isPromotableIntegerType())
         return ABIArgInfo::getExtend(ArgTy);
     }
     return ABIArgInfo::getDirect();

@@ -109,18 +109,21 @@ class IntegerType : public Type {
 private:
   bool IsSigned;
   bool IsBitInt;
+  bool IsPromotable;
 
 public:
   IntegerType(uint64_t BitWidth, Align Align, bool Signed,
-              bool BitInt = false)
+              bool BitInt = false, bool IsPromotableInt = false)
       : Type(TypeKind::Integer, TypeSize::getFixed(BitWidth), Align),
-        IsSigned(Signed), IsBitInt(BitInt){}
+        IsSigned(Signed), IsBitInt(BitInt),
+        IsPromotable(IsPromotableInt) {}
 
   bool isSigned() const { return IsSigned; }
   bool isBitInt() const { return IsBitInt; }
   bool isBool() const {
   return getSizeInBits().getFixedValue() == 1 && !IsBitInt;
 }
+  bool isPromotableIntegerType() const { return IsPromotable; }
 
   static bool classof(const Type *T) {
     return T->getKind() == TypeKind::Integer;
@@ -393,9 +396,10 @@ public:
   }
 
   const IntegerType *getIntegerType(uint64_t BitWidth, Align Align, bool Signed,
-                                    bool IsBitInt = false) {
+                                    bool IsBitInt = false,
+                                    bool IsPromotable = false) {
     return new (Allocator.Allocate<IntegerType>())
-        IntegerType(BitWidth, Align, Signed, IsBitInt);
+        IntegerType(BitWidth, Align, Signed, IsBitInt, IsPromotable);
   }
 
   const FloatType *getFloatType(const fltSemantics &Semantics, Align Align) {

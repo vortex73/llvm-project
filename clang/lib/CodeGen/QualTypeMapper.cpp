@@ -80,9 +80,11 @@ const llvm::abi::Type *QualTypeMapper::convertType(QualType QT) {
     Result = convertMemberPointerType(MPT);
   else if (const auto *BIT = dyn_cast<BitIntType>(QT.getTypePtr())) {
     unsigned RawNumBits = BIT->getNumBits();
+    bool IsPromotableInt = BIT->getNumBits() < ASTCtx.getTypeSize(ASTCtx.IntTy);
     bool IsSigned = BIT->isSigned();
     llvm::Align TypeAlign = getTypeAlign(QT);
-    return Builder.getIntegerType(RawNumBits, TypeAlign, IsSigned, true);
+    return Builder.getIntegerType(RawNumBits, TypeAlign, IsSigned, true,
+                                  IsPromotableInt);
   } else if (isa<ObjCObjectType>(QT.getTypePtr()) ||
              isa<ObjCObjectPointerType>(QT.getTypePtr())) {
     // Objective-C objects are represented as pointers in the ABI
@@ -119,7 +121,8 @@ QualTypeMapper::convertBuiltinType(const BuiltinType *BT) {
     return createPointerTypeForPointee(QT);
 
   case BuiltinType::Bool:
-    return Builder.getIntegerType(1, getTypeAlign(QT), false, false);
+    return Builder.getIntegerType(1, getTypeAlign(QT), false, false,
+                                  ASTCtx.isPromotableIntegerType(QT));
   case BuiltinType::Char_S:
   case BuiltinType::Char_U:
   case BuiltinType::SChar:
@@ -140,7 +143,8 @@ QualTypeMapper::convertBuiltinType(const BuiltinType *BT) {
   case BuiltinType::Int128:
   case BuiltinType::UInt128:
     return Builder.getIntegerType(ASTCtx.getTypeSize(QT), getTypeAlign(QT),
-                                  BT->isSignedInteger(), false);
+                                  BT->isSignedInteger(), false,
+                                  ASTCtx.isPromotableIntegerType(QT));
 
   case BuiltinType::Half:
   case BuiltinType::Float16:
