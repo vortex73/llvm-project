@@ -107,11 +107,6 @@ public:
 static const Type *reduceUnionForX8664(const RecordType *UnionType,
                                        TypeBuilder &TB) {
   assert(UnionType->isUnion() && "Expected union type");
- static llvm::DenseMap<const RecordType *, const Type *> UnionReductionCache;
-
-  auto CacheIt = UnionReductionCache.find(UnionType);
-  if (CacheIt != UnionReductionCache.end())
-    return CacheIt->second;
   ArrayRef<FieldInfo> Fields = UnionType->getFields();
   if (Fields.empty()) {
     return nullptr;
@@ -142,7 +137,6 @@ if (!StorageType ||
       StorageType = FieldType;
     }
   }
-    UnionReductionCache[UnionType] = StorageType;
   return StorageType;
 }
 
@@ -615,7 +609,7 @@ X86_64ABIInfo::classifyArgumentType(const Type *Ty, unsigned FreeIntRegs,
     // If we have a sign or zero extended integer, make sure to return Extend
     // so that the parameter gets the right LLVM IR attributes.
     if (Hi == NoClass && ResType->isInteger()) {
-      if (Ty->isInteger() && cast<IntegerType>(Ty)->isPromotableIntegerType())
+      if (Ty->isInteger() && isPromotableInteger(cast<IntegerType>(Ty)))
         return ABIArgInfo::getExtend(Ty);
     }
 
@@ -724,7 +718,7 @@ ABIArgInfo X86_64ABIInfo::classifyReturnType(const Type *RetTy) const {
     // so that the parameter gets the right LLVM IR attributes.
     if (Hi == NoClass && ResType->isInteger()) {
       if (const IntegerType *IntTy = dyn_cast<IntegerType>(RetTy)) {
-        if (IntTy->isPromotableIntegerType()) {
+        if (isPromotableInteger(IntTy)) {
           ABIArgInfo Info = ABIArgInfo::getExtend(RetTy);
           return Info;
         }
@@ -1310,7 +1304,7 @@ ABIArgInfo X86_64ABIInfo::getIndirectResult(const Type *Ty,
   // 'onstack'. See PR12193.
   if (!isAggregateTypeForABI(Ty) && !isIllegalVectorType(Ty) &&
       !(Ty->isInteger() && cast<IntegerType>(Ty)->isBitInt())) {
-    return (Ty->isInteger() && cast<IntegerType>(Ty)->isPromotableIntegerType()
+    return (Ty->isInteger() && isPromotableInteger(cast<IntegerType>(Ty))
                 ? ABIArgInfo::getExtend(Ty)
                 : ABIArgInfo::getDirect());
   }
@@ -1367,7 +1361,7 @@ ABIArgInfo X86_64ABIInfo::getIndirectReturnResult(const Type *Ty) const {
     // Handle integer types that need extension
     if (Ty->isInteger()) {
       const IntegerType *IntTy = cast<IntegerType>(Ty);
-      if (IntTy->isPromotableIntegerType()) {
+      if (isPromotableInteger(IntTy)) {
         ABIArgInfo Info = ABIArgInfo::getExtend(Ty);
         return Info;
       }

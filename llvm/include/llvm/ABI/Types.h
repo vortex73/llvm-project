@@ -109,21 +109,18 @@ class IntegerType : public Type {
 private:
   bool IsSigned;
   bool IsBitInt;
-  bool IsPromotable;
 
 public:
   IntegerType(uint64_t BitWidth, Align Align, bool Signed,
-              bool BitInt = false, bool IsPromotableInt = false)
+              bool BitInt = false)
       : Type(TypeKind::Integer, TypeSize::getFixed(BitWidth), Align),
-        IsSigned(Signed), IsBitInt(BitInt),
-        IsPromotable(IsPromotableInt) {}
+        IsSigned(Signed), IsBitInt(BitInt) {}
 
   bool isSigned() const { return IsSigned; }
   bool isBitInt() const { return IsBitInt; }
   bool isBool() const {
   return getSizeInBits().getFixedValue() == 1 && !IsBitInt;
 }
-  bool isPromotableIntegerType() const { return IsPromotable; }
 
   static bool classof(const Type *T) {
     return T->getKind() == TypeKind::Integer;
@@ -195,8 +192,8 @@ private:
   bool IsMatrix;
 
 public:
-  ArrayType(const Type *ElemType, uint64_t NumElems, bool IsMatrixType = false)
-      : Type(TypeKind::Array, ElemType->getSizeInBits() * NumElems,
+  ArrayType(const Type *ElemType, uint64_t NumElems,uint64_t SizeInBits, bool IsMatrixType = false)
+      : Type(TypeKind::Array, TypeSize::getFixed(SizeInBits),
              ElemType->getAlignment()),
         ElementType(ElemType), NumElements(NumElems), IsMatrix(IsMatrixType) {}
 
@@ -396,10 +393,9 @@ public:
   }
 
   const IntegerType *getIntegerType(uint64_t BitWidth, Align Align, bool Signed,
-                                    bool IsBitInt = false,
-                                    bool IsPromotable = false) {
+                                    bool IsBitInt = false) {
     return new (Allocator.Allocate<IntegerType>())
-        IntegerType(BitWidth, Align, Signed, IsBitInt, IsPromotable);
+        IntegerType(BitWidth, Align, Signed, IsBitInt);
   }
 
   const FloatType *getFloatType(const fltSemantics &Semantics, Align Align) {
@@ -413,9 +409,9 @@ public:
   }
 
   const ArrayType *getArrayType(const Type *ElementType, uint64_t NumElements,
-                                bool IsMatrixType = false) {
+                                uint64_t SizeInBits, bool IsMatrixType = false) {
     return new (Allocator.Allocate<ArrayType>())
-        ArrayType(ElementType, NumElements, IsMatrixType);
+        ArrayType(ElementType, NumElements, SizeInBits, IsMatrixType);
   }
 
   const VectorType *getVectorType(const Type *ElementType,

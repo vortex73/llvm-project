@@ -75,16 +75,14 @@ const llvm::abi::Type *QualTypeMapper::convertType(QualType QT) {
   else if (const auto *MT = dyn_cast<ConstantMatrixType>(QT.getTypePtr())) {
     const llvm::abi::Type *ElementType = convertType(MT->getElementType());
     uint64_t NumElements = MT->getNumRows() * MT->getNumColumns();
-    return Builder.getArrayType(ElementType, NumElements, true);
+    return Builder.getArrayType(ElementType, NumElements, ASTCtx.getTypeSize(QT),  true);
   } else if (const auto *MPT = dyn_cast<MemberPointerType>(QT.getTypePtr()))
     Result = convertMemberPointerType(MPT);
   else if (const auto *BIT = dyn_cast<BitIntType>(QT.getTypePtr())) {
     unsigned RawNumBits = BIT->getNumBits();
-    bool IsPromotableInt = BIT->getNumBits() < ASTCtx.getTypeSize(ASTCtx.IntTy);
     bool IsSigned = BIT->isSigned();
     llvm::Align TypeAlign = getTypeAlign(QT);
-    return Builder.getIntegerType(RawNumBits, TypeAlign, IsSigned, true,
-                                  IsPromotableInt);
+    return Builder.getIntegerType(RawNumBits, TypeAlign, IsSigned, true);
   } else if (isa<ObjCObjectType>(QT.getTypePtr()) ||
              isa<ObjCObjectPointerType>(QT.getTypePtr())) {
     // Objective-C objects are represented as pointers in the ABI
@@ -121,8 +119,7 @@ QualTypeMapper::convertBuiltinType(const BuiltinType *BT) {
     return createPointerTypeForPointee(QT);
 
   case BuiltinType::Bool:
-    return Builder.getIntegerType(1, getTypeAlign(QT), false, false,
-                                  ASTCtx.isPromotableIntegerType(QT));
+    return Builder.getIntegerType(1, getTypeAlign(QT), false, false);
   case BuiltinType::Char_S:
   case BuiltinType::Char_U:
   case BuiltinType::SChar:
@@ -143,8 +140,7 @@ QualTypeMapper::convertBuiltinType(const BuiltinType *BT) {
   case BuiltinType::Int128:
   case BuiltinType::UInt128:
     return Builder.getIntegerType(ASTCtx.getTypeSize(QT), getTypeAlign(QT),
-                                  BT->isSignedInteger(), false,
-                                  ASTCtx.isPromotableIntegerType(QT));
+                                  BT->isSignedInteger(), false);
 
   case BuiltinType::Half:
   case BuiltinType::Float16:
@@ -218,14 +214,14 @@ QualTypeMapper::convertArrayType(const clang::ArrayType *AT) {
 
   if (const auto *CAT = dyn_cast<ConstantArrayType>(AT)) {
     auto NumElements = CAT->getZExtSize();
-    return Builder.getArrayType(ElementType, NumElements);
+    return Builder.getArrayType(ElementType, NumElements, ASTCtx.getTypeSize(AT));
   }
   if (isa<IncompleteArrayType>(AT))
-    return Builder.getArrayType(ElementType, 0);
+    return Builder.getArrayType(ElementType, 0,0);
   if (const auto *VAT = dyn_cast<VariableArrayType>(AT))
     return createPointerTypeForPointee(VAT->getPointeeType());
   // Fallback for other array types
-  return Builder.getArrayType(ElementType, 1);
+  return Builder.getArrayType(ElementType, 1, ASTCtx.getTypeSize(AT));
 }
 
 const llvm::abi::Type *QualTypeMapper::convertVectorType(const VectorType *VT) {

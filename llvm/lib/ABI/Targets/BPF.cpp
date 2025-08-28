@@ -54,7 +54,7 @@ public:
           CoerceTy = TB.getIntegerType(AlignedBits, Align(8), false);
         } else {
           const Type *RegTy = TB.getIntegerType(64, Align(8), false);
-          CoerceTy = TB.getArrayType(RegTy, 2);
+          CoerceTy = TB.getArrayType(RegTy, 2,128);
         }
         return ABIArgInfo::getDirect(CoerceTy);
       }
@@ -67,7 +67,7 @@ public:
       if (IntTy->isBitInt() && BitWidth > 128)
         return ABIArgInfo::getIndirect(ArgTy->getAlignment().value());
 
-      if (IntTy->isPromotableIntegerType())
+      if (isPromotableInteger(IntTy))
         return ABIArgInfo::getExtend(ArgTy);
     }
     return ABIArgInfo::getDirect();
